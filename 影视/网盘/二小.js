@@ -12,7 +12,7 @@ const fs = require("fs");
 
 // ==================== 配置区域 ====================
 // 网站地址(可以通过环境变量配置,支持多个域名用;分割)
-const WEB_SITE_CONFIG = process.env.WEB_SITE_MUOU || "https://erxiaofn.click;https://erxiaofn.site;https://wexwp.cc;https://www.erixaopan.fun;http://2xiaopan.fun;https://erixaopan.fun;";
+const WEB_SITE_CONFIG = process.env.WEB_SITE_MUOU || "https://wexwp.cc;https://www.erixaopan.fun;https://erxiaofn.click;https://erxiaofn.site;http://2xiaopan.fun;https://erixaopan.fun;";
 const WEB_SITES = WEB_SITE_CONFIG.split(';').map(url => url.trim()).filter(url => url);
 // 筛选配置: 环境变量 -> 本地文件 -> 远程链接
 const FILTERS_PATH_REMOTE = "https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/blob/main/%E9%85%8D%E7%BD%AE/%E7%AD%9B%E9%80%89/erxiao.json";
