@@ -1,4 +1,10 @@
-// @name 玩偶系模板
+// @name 玩偶
+// @author 
+// @description 刮削：支持，弹幕：支持，播放记录：支持
+// @dependencies: axios, cheerio
+// @version 1.0.0
+// @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/网盘/玩偶.js
+
 // 引入 OmniBox SDK
 const OmniBox = require("omnibox_sdk");
 // 引入 cheerio(用于 HTML 解析)
@@ -76,7 +82,6 @@ function isBlockedHtml(body = "") {
   return (
     lower.includes("just a moment") ||
     lower.includes("cf-browser-verification") ||
-    lower.includes("cloudflare") ||
     lower.includes("captcha") ||
     lower.includes("访问验证")
   );
@@ -611,9 +616,6 @@ async function detail(params) {
 
         // 刮削处理
         let scrapingSuccess = false;
-        // 以视频ID作为刮削资源ID，保证同一条目下刮削结果稳定复用
-        const sourceId = `spider_source_${await OmniBox.getSourceId()}_${videoId}`;
-
         try {
           OmniBox.log("info", `开始执行刮削处理,资源名: ${vodName}, 视频文件数: ${allVideoFiles.length}`);
 
@@ -629,7 +631,7 @@ async function detail(params) {
 
           OmniBox.log("info", `文件ID格式转换完成,示例: ${videoFilesForScraping[0]?.fid || "N/A"}`);
 
-          const scrapingResult = await OmniBox.processScraping(sourceId, vodName, vodName, videoFilesForScraping);
+          const scrapingResult = await OmniBox.processDriveScraping(shareURL, vodName, vodName, videoFilesForScraping);
           OmniBox.log("info", `刮削处理完成,结果: ${JSON.stringify(scrapingResult).substring(0, 200)}`);
           scrapingSuccess = true;
         } catch (error) {
@@ -645,8 +647,8 @@ async function detail(params) {
         let scrapeType = "";
 
         try {
-          OmniBox.log("info", `开始获取元数据,resourceId: ${sourceId}`);
-          const metadata = await OmniBox.getScrapeMetadata(sourceId);
+          OmniBox.log("info", `开始获取元数据,shareURL: ${shareURL}`);
+          const metadata = await OmniBox.getDriveMetadata(shareURL);
           OmniBox.log("info", `获取元数据响应: ${JSON.stringify(metadata).substring(0, 500)}`);
 
           scrapeData = metadata.scrapeData || null;
@@ -672,8 +674,7 @@ async function detail(params) {
           allVideoFiles,
           scrapeData,
           videoMappings,
-          scrapeType,
-          sourceId
+          scrapeType
         };
 
       } catch (error) {
@@ -963,7 +964,7 @@ async function search(params) {
 /**
  * 获取播放地址
  */
-async function play(params) {
+async function play(params, context) {
   try {
     const flag = params.flag || "";
     const playId = params.playId || "";
@@ -996,19 +997,7 @@ async function play(params) {
     let episodeName = params.episodeName || "";
 
     try {
-      // 优先使用视频ID维度读取刮削元数据，与 detail 阶段保持一致
-      const sourceIdByVod = params.vodId
-        ? `spider_source_${await OmniBox.getSourceId()}_${params.vodId}`
-        : "";
-      const sourceIdByShare = `spider_source_${await OmniBox.getSourceId()}_${shareURL}`;
-
-      let metadata = null;
-      if (sourceIdByVod) {
-        metadata = await OmniBox.getScrapeMetadata(sourceIdByVod);
-      }
-      if (!metadata || (!metadata.scrapeData && !metadata.videoMappings)) {
-        metadata = await OmniBox.getScrapeMetadata(sourceIdByShare);
-      }
+      let metadata = await OmniBox.getDriveMetadata(shareURL);
 
       if (metadata && metadata.scrapeData && metadata.videoMappings) {
         const formattedFileId = fileId ? `${shareURL}|${fileId}` : "";
@@ -1080,7 +1069,7 @@ async function play(params) {
 
     // ==================== 新增：添加观看记录 ====================
     try {
-      const sourceId = await OmniBox.getSourceId();
+      const sourceId = context.sourceId;
       if (sourceId) {
         const vodId = params.vodId || shareURL;
         const title = params.title || scrapeTitle || shareURL;
