@@ -1,3 +1,9 @@
+// @name 永乐视频
+// @author 
+// @description 刮削：支持，弹幕：支持，嗅探：支持
+// @version 1.0.0
+// @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/采集/永乐视频.js
+
 /**
  * ============================================================================
  * 永乐视频 - OmniBox 爬虫脚本 (增强版)
@@ -14,6 +20,7 @@ const OmniBox = require("omnibox_sdk");
 const config = {
     host: "https://www.ylys.tv"
 };
+const DANMU_API = process.env.DANMU_API || "";
 
 // 配置请求实例,禁用SSL验证
 const _http = axios.create({
@@ -57,6 +64,133 @@ const decodeMeta = (str) => {
         return JSON.parse(raw);
     } catch {
         return {};
+    }
+};
+
+// ========== 弹幕工具函数 ==========
+const preprocessTitle = (title) => {
+    if (!title) return "";
+    return title
+        .replace(/4[kK]|[xX]26[45]|720[pP]|1080[pP]|2160[pP]/g, " ")
+        .replace(/[hH]\\.?26[45]/g, " ")
+        .replace(/BluRay|WEB-DL|HDR|REMUX/gi, " ")
+        .replace(/\.mp4|\.mkv|\.avi|\.flv/gi, " ");
+};
+
+const chineseToArabic = (cn) => {
+    const map = { '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+    if (!isNaN(cn)) return parseInt(cn, 10);
+    if (cn.length === 1) return map[cn] || cn;
+    if (cn.length === 2) {
+        if (cn[0] === '十') return 10 + map[cn[1]];
+        if (cn[1] === '十') return map[cn[0]] * 10;
+    }
+    if (cn.length === 3) return map[cn[0]] * 10 + map[cn[2]];
+    return cn;
+};
+
+const extractEpisode = (title) => {
+    if (!title) return "";
+    const processedTitle = preprocessTitle(title).trim();
+
+    const cnMatch = processedTitle.match(/第\s*([零一二三四五六七八九十0-9]+)\s*[集话章节回期]/);
+    if (cnMatch) return String(chineseToArabic(cnMatch[1]));
+
+    const seMatch = processedTitle.match(/[Ss](?:\d{1,2})?[-._\s]*[Ee](\d{1,3})/i);
+    if (seMatch) return seMatch[1];
+
+    const epMatch = processedTitle.match(/\b(?:EP|E)[-._\s]*(\d{1,3})\b/i);
+    if (epMatch) return epMatch[1];
+
+    const bracketMatch = processedTitle.match(/[\[\(【(](\d{1,3})[\]\)】)]/);
+    if (bracketMatch) {
+        const num = bracketMatch[1];
+        if (!["720", "1080", "480"].includes(num)) return num;
+    }
+
+    return "";
+};
+
+const buildFileNameForDanmu = (vodName, episodeTitle) => {
+    if (!vodName) return "";
+    if (!episodeTitle || episodeTitle === '正片' || episodeTitle === '播放') return vodName;
+
+    const digits = extractEpisode(episodeTitle);
+    if (digits) {
+        const epNum = parseInt(digits, 10);
+        if (epNum > 0) {
+            if (epNum < 10) return `${vodName} S01E0${epNum}`;
+            return `${vodName} S01E${epNum}`;
+        }
+    }
+    return vodName;
+};
+
+const buildScrapedDanmuFileName = (scrapeData, scrapeType, mapping, fallbackVodName, fallbackEpisodeName) => {
+    if (!scrapeData) {
+        return buildFileNameForDanmu(fallbackVodName, fallbackEpisodeName);
+    }
+    if (scrapeType === 'movie') {
+        return scrapeData.title || fallbackVodName;
+    }
+    const title = scrapeData.title || fallbackVodName;
+    const seasonAirYear = scrapeData.seasonAirYear || '';
+    const seasonNumber = mapping?.seasonNumber || 1;
+    const episodeNumber = mapping?.episodeNumber || 1;
+    return `${title}.${seasonAirYear}.S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
+};
+
+const matchDanmu = async (fileName) => {
+    if (!DANMU_API || !fileName) return [];
+
+    try {
+        logInfo(`匹配弹幕: ${fileName}`);
+        const matchUrl = `${DANMU_API}/api/v2/match`;
+        const response = await OmniBox.request(matchUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            body: JSON.stringify({ fileName }),
+        });
+
+        if (response.statusCode !== 200) {
+            logInfo(`弹幕匹配失败: HTTP ${response.statusCode}`);
+            return [];
+        }
+
+        const matchData = JSON.parse(response.body);
+        if (!matchData.isMatched) {
+            logInfo("弹幕未匹配到");
+            return [];
+        }
+
+        const matches = matchData.matches || [];
+        if (matches.length === 0) return [];
+
+        const firstMatch = matches[0];
+        const episodeId = firstMatch.episodeId;
+        const animeTitle = firstMatch.animeTitle || "";
+        const episodeTitle = firstMatch.episodeTitle || "";
+        if (!episodeId) return [];
+
+        let danmakuName = "弹幕";
+        if (animeTitle && episodeTitle) {
+            danmakuName = `${animeTitle} - ${episodeTitle}`;
+        } else if (animeTitle) {
+            danmakuName = animeTitle;
+        } else if (episodeTitle) {
+            danmakuName = episodeTitle;
+        }
+
+        return [{
+            name: danmakuName,
+            url: `${DANMU_API}/api/v2/comment/${episodeId}?format=xml`,
+        }];
+    } catch (error) {
+        logInfo(`弹幕匹配失败: ${error.message}`);
+        return [];
     }
 };
 
@@ -450,6 +584,25 @@ const parsePlaySources = (playFrom, playUrl, videoId = '', vodName = '') => {
     }
     logInfo("播放源解析结果", playSources);
     return playSources;
+};
+
+const sniffYlysPlay = async (playUrl) => {
+    try {
+        const sniffed = await OmniBox.sniffVideo(playUrl);
+        if (sniffed && sniffed.url) {
+            return {
+                urls: [{ name: "嗅探线路", url: sniffed.url }],
+                parse: 0,
+                header: sniffed.header || {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': playUrl
+                }
+            };
+        }
+    } catch (error) {
+        logError("嗅探失败", error);
+    }
+    return null;
 };
 
 // ========== 接口实现 ==========
@@ -1000,6 +1153,9 @@ async function play(params) {
     logInfo(`准备播放 ID: ${playId}`);
     let url = '';
     let playMeta = {};
+    let scrapeData = null;
+    let videoMappings = [];
+    let scrapeType = '';
 
     if (playId.includes('|||')) {
         const [mainPlayId, metaB64] = playId.split('|||');
@@ -1024,15 +1180,18 @@ async function play(params) {
             const videoIdFromMeta = playMeta?.sid ? String(playMeta.sid) : '';
             const videoIdForScrape = videoIdFromParam || videoIdFromMeta;
             if (videoIdForScrape) {
-                await OmniBox.getScrapeMetadata(videoIdForScrape);
+                const metadata = await OmniBox.getScrapeMetadata(videoIdForScrape);
+                scrapeData = metadata?.scrapeData || null;
+                videoMappings = metadata?.videoMappings || [];
+                scrapeType = metadata?.scrapeType || '';
             }
         } catch (error) {
             logInfo(`读取刮削元数据失败: ${error.message}`);
         }
 
-        const playUrl = `${config.host}/play/${playId}/`;
-        logInfo(`播放地址请求: ${playUrl}`);
-        const res = await _http.get(playUrl);
+        const playPageUrl = `${config.host}/play/${playId}/`;
+        logInfo(`播放地址请求: ${playPageUrl}`);
+        const res = await _http.get(playPageUrl);
 
         let match = res.data.match(/var player_aaaa=.*?"url":"([^"]+\.m3u8)"/);
         if (!match) match = res.data.match(/var player_data=.*?"url":"([^"]+\.m3u8)"/);
@@ -1091,7 +1250,7 @@ async function play(params) {
     const finalUrl = (url && url.startsWith('http')) ? url : playId;
     logInfo(`最终播放地址: ${finalUrl}`);
 
-    return {
+    let playResponse = {
         urls: [{ name: "极速云", url: finalUrl }],
         parse: 0,
         header: {
@@ -1099,6 +1258,36 @@ async function play(params) {
             'Referer': config.host + '/'
         }
     };
+
+    const isDirectPlayable = finalUrl.match(/\.(m3u8|mp4|flv|avi|mkv|ts)(\?|$)/i);
+    if (!isDirectPlayable) {
+        const sniffResult = await sniffYlysPlay(`${config.host}/play/${playId}/`);
+        if (sniffResult) {
+            playResponse = sniffResult;
+        }
+    }
+
+    if (DANMU_API) {
+        try {
+            const mapping = playMeta?.fid ? videoMappings.find((m) => m?.fileId === playMeta.fid) : null;
+            const fallbackVodName = playMeta?.v || params.vodName || '';
+            const fallbackEpisodeName = playMeta?.e || '';
+            const scrapedDanmuFileName = buildScrapedDanmuFileName(scrapeData, scrapeType, mapping, fallbackVodName, fallbackEpisodeName);
+            const danmuFileName = scrapedDanmuFileName || buildFileNameForDanmu(fallbackVodName, fallbackEpisodeName);
+            logInfo(`尝试匹配弹幕文件名: ${danmuFileName}`);
+            const danmakuList = await matchDanmu(danmuFileName);
+            if (danmakuList.length > 0) {
+                playResponse.danmaku = danmakuList;
+                logInfo("弹幕已添加到播放响应");
+            }
+        } catch (error) {
+            logInfo(`弹幕匹配异常: ${error.message}`);
+        }
+    } else {
+        logInfo("DANMU_API 未配置，跳过弹幕匹配");
+    }
+
+    return playResponse;
 }
 
 module.exports = { home, category, search, detail, play };
