@@ -2,7 +2,7 @@
 // @author @sifanss
 // @description 必填参数：BASE_URL，XIAOYA_TOKEN
 // @dependencies: axios
-// @version 1.0.0
+// @version 1.0.1
 // @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/网盘/小雅.js
 
 // 引入 OmniBox SDK
@@ -45,6 +45,55 @@ const HTTP_CLIENT = axios.create({
   httpAgent: new http.Agent({ keepAlive: true }),
   validateStatus: (status) => status >= 200,
 });
+
+const proxyImageDomains = new Set([
+  "img1.doubanio.com",
+  "img2.doubanio.com",
+  "img3.doubanio.com",
+]);
+
+/**
+ * 修复图片地址
+ */
+function fixPicUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return url.startsWith("/") ? `${BASE_URL}${url}` : `${BASE_URL}/${url}`;
+}
+
+/**
+ * 图片代理
+ */
+function processImageUrl(imageUrl, baseURL = "") {
+  if (!imageUrl) return "";
+  const url = fixPicUrl(imageUrl);
+  if (!baseURL || !url.startsWith("http")) return url;
+
+  try {
+    const urlObj = new URL(url);
+    if (!proxyImageDomains.has(urlObj.hostname)) return url;
+    const referer = `${urlObj.protocol}//${urlObj.host}`;
+    const urlWithHeaders = `${url}@Referer=${referer}`;
+    const encodedUrl = encodeURIComponent(urlWithHeaders);
+    return `${baseURL}/api/proxy/image?url=${encodedUrl}`;
+  } catch (error) {
+    OmniBox.log("warn", `处理图片 URL 失败: ${error.message}`);
+    return url;
+  }
+}
+
+function applyImageProxyToList(list, baseURL = "") {
+  if (!Array.isArray(list)) return list;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    if (item.vod_pic) {
+      item.vod_pic = processImageUrl(item.vod_pic, baseURL);
+    } else if (item.VodPic) {
+      item.VodPic = processImageUrl(item.VodPic, baseURL);
+    }
+  }
+  return list;
+}
 
 /**
  * 解析自定义分类配置
@@ -221,10 +270,11 @@ function convertToPlaySources(vodPlayFrom, vodPlayUrl, vodId) {
 /**
  * 首页
  */
-async function home(params) {
+async function home(params, context) {
   try {
     OmniBox.log("info", "获取首页数据");
     const page = params.page || 1;
+    const baseURL = context?.baseURL || "";
 
     const data = await requestXiaoya(VOD_PATH, {
       ac: "list",
@@ -241,6 +291,10 @@ async function home(params) {
       data.filters = normalizeFilters(data.filters);
     }
 
+    if (data && data.list) {
+      applyImageProxyToList(data.list, baseURL);
+    }
+
     return data;
   } catch (error) {
     OmniBox.log("error", `获取首页数据失败: ${error.message}`);
@@ -251,10 +305,11 @@ async function home(params) {
 /**
  * 分类
  */
-async function category(params) {
+async function category(params, context) {
   try {
     const categoryId = params.categoryId || params.type_id || "";
     const page = params.page || 1;
+    const baseURL = context?.baseURL || "";
 
     if (!categoryId) {
       OmniBox.log("warn", "分类ID为空");
@@ -269,6 +324,10 @@ async function category(params) {
       pg: String(page),
     });
 
+    if (data && data.list) {
+      applyImageProxyToList(data.list, baseURL);
+    }
+
     return data;
   } catch (error) {
     OmniBox.log("error", `获取分类数据失败: ${error.message}`);
@@ -279,10 +338,11 @@ async function category(params) {
 /**
  * 搜索
  */
-async function search(params) {
+async function search(params, context) {
   try {
     const keyword = params.keyword || params.wd || "";
     const page = params.page || 1;
+    const baseURL = context?.baseURL || "";
 
     if (!keyword) {
       OmniBox.log("warn", "搜索关键词为空");
@@ -297,6 +357,10 @@ async function search(params) {
       pg: String(page),
     });
 
+    if (data && data.list) {
+      applyImageProxyToList(data.list, baseURL);
+    }
+
     return data;
   } catch (error) {
     OmniBox.log("error", `搜索视频失败: ${error.message}`);
@@ -307,9 +371,10 @@ async function search(params) {
 /**
  * 详情
  */
-async function detail(params) {
+async function detail(params, context) {
   try {
     const videoId = params.videoId || "";
+    const baseURL = context?.baseURL || "";
     if (!videoId) {
       throw new Error("视频ID不能为空");
     }
@@ -348,6 +413,8 @@ async function detail(params) {
     } else {
       OmniBox.log("warn", "详情缺少播放字段，可能导致无播放按钮");
     }
+
+    applyImageProxyToList(data.list, baseURL);
 
     return data;
   } catch (error) {
