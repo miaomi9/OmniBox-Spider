@@ -2,7 +2,7 @@
 // @author 
 // @description 刮削：支持，弹幕：支持，嗅探：支持
 // @dependencies: axios
-// @version 1.0.1
+// @version 1.0.2
 // @downloadURL https://gh-proxy.org/https://github.com/Silent1566/OmniBox-Spider/raw/refs/heads/main/影视/采集/RRSP.js
 
 
@@ -489,11 +489,16 @@ async function search(params, context) {
         const data = res.data.data;
         const videos = [...arr2vods(data.chasingFanCorrelation, baseURL), ...arr2vods(data.moviesCorrelation, baseURL)];
 
-        return {
+        const r = {
             list: videos,
             page: pg,
-            pagecount: data.pagecount || 10
+            pagecount: data.pagecount || 10,
+            total: videos.length
         };
+
+        OmniBox.log('info', `搜索响应：${JSON.stringify(r)}`)
+
+        return r;
     } catch (e) {
         logError("搜索失败", e);
         return { list: [], page: pg, pagecount: 0 };
